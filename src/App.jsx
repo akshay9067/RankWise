@@ -1,5 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { DATA } from './data.js'
+import { SECOND_PHASE_DATA } from './dataSecondPhase.js'
+import { FINAL_PHASE_DATA } from './dataFinalPhase.js'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const CATEGORIES = [
@@ -12,6 +14,14 @@ const CATEGORIES = [
 ]
 
 const CTYPE_LABEL = { PVT: 'Private', UNIV: 'University', GOV: 'Government', SF: 'Self Finance' }
+
+const PHASES = [
+  { key: 'first', label: 'First Phase', data: DATA },
+  { key: 'second', label: 'Second Phase', data: SECOND_PHASE_DATA },
+  { key: 'last', label: 'Last Phase', data: FINAL_PHASE_DATA },
+]
+
+const DATA_BY_PHASE = Object.fromEntries(PHASES.map(phase => [phase.key, phase.data]))
 
 const DIST_NAMES = {
   HYD: 'Hyderabad', MDL: 'Medchal-Malkajgiri', RR: 'Rangareddy',
@@ -31,14 +41,65 @@ const LOADING_STEPS = [
   'Almost ready…',
 ]
 
-const ALL_DISTRICTS = [...new Set(DATA.map(r => r.dist))].sort()
-const ALL_BRANCHES  = [...new Set(DATA.map(r => r.branch))].sort()
+const ALL_DATA = PHASES.flatMap(phase => phase.data)
+const ALL_DISTRICTS = [...new Set(ALL_DATA.map(r => r.dist))].sort()
+const ALL_BRANCHES  = [...new Set(ALL_DATA.map(r => r.branch))].sort()
 
 function getChance(closing, rank) {
   const d = closing - rank
   if (d >= 2000) return { cls: 'b-safe',   label: 'Good Chance' }
   if (d >= 500)  return { cls: 'b-border', label: 'Can Try' }
   return               { cls: 'b-tight',  label: 'Backup' }
+}
+
+const CHANCE_META = {
+  canTry: { cls: 'b-tight', label: 'Can Try' },
+  good: { cls: 'b-safe', label: 'Good Chance' },
+  backup: { cls: 'b-border', label: 'Backup' },
+}
+
+function uniqueRows(rows) {
+  const seen = new Set()
+  return rows.filter(row => {
+    const key = `${row.code}-${row.bcode}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+const CAN_TRY_CEILING = 1000    // delta 0–999      → tight, risky
+const GOOD_CEILING    = 15000   // delta 1000–14999  → comfortable
+                                // delta 15000+      → very safe
+
+function getCounsellingBuckets(rows) {
+  // delta = closing − userRank, always >= 0 (ineligibles pre-filtered)
+  // Lower delta = riskier, higher delta = safer
+
+  const byDelta = [...rows].sort((a, b) => a.delta - b.delta)
+
+  const canTry = byDelta
+    .filter(r => r.delta < CAN_TRY_CEILING)
+    .slice(0, 8)
+
+  const canTryKeys = new Set(canTry.map(r => `${r.code}|${r.bcode}`))
+
+  const good = byDelta
+    .filter(r => r.delta >= CAN_TRY_CEILING && r.delta < GOOD_CEILING)
+    .filter(r => !canTryKeys.has(`${r.code}|${r.bcode}`))
+    .slice(0, 12)
+
+  const goodKeys = new Set(good.map(r => `${r.code}|${r.bcode}`))
+
+  const backup = byDelta
+    .filter(r => r.delta >= GOOD_CEILING)
+    .filter(r =>
+      !canTryKeys.has(`${r.code}|${r.bcode}`) &&
+      !goodKeys.has(`${r.code}|${r.bcode}`)
+    )
+    .slice(0, 12)
+
+  return { canTry, good, backup }
 }
 
 // ── Loading Overlay ──────────────────────────────────────────────────────────
@@ -60,7 +121,7 @@ function LoadingOverlay({ step }) {
 
 // ── Mobile Result Card ───────────────────────────────────────────────────────
 function ResultCard({ row, rankNum, saved, onSave }) {
-  const ch = getChance(row.closing, rankNum)
+  const ch = row.chance || getChance(row.closing, rankNum)
   const distName = DIST_NAMES[row.dist] || row.dist
   const isGov = row.ctype === 'GOV' || row.ctype === 'UNIV'
   return (
@@ -90,11 +151,11 @@ function ResultCard({ row, rankNum, saved, onSave }) {
 }
 
 // ── Strategy Panel ───────────────────────────────────────────────────────────
-function StrategyPanel({ tight, border, safe }) {
+function StrategyPanel({ canTry, good, backup }) {
   const cols = [
-    { id: 'can-try', heading: 'Can Try', sub: 'choices 1–2', color: 'var(--red)', items: tight.slice(0, 2), cardCls: 'sc-tight' },
-    { id: 'good',    heading: 'Good Chance', sub: 'choices 3–5', color: 'var(--blue)', items: border.slice(0, 3), cardCls: 'sc-border' },
-    { id: 'backup',  heading: 'Backup', sub: 'choices 6–8', color: 'var(--amber)', items: safe.slice(0, 3), cardCls: 'sc-safe' },
+    { id: 'can-try', heading: 'Can Try', sub: 'choices 1–2', color: 'var(--red)', items: canTry.slice(0, 2), cardCls: 'sc-tight' },
+    { id: 'good',    heading: 'Good Chance', sub: 'choices 3–5', color: 'var(--blue)', items: good.slice(0, 3), cardCls: 'sc-border' },
+    { id: 'backup',  heading: 'Backup', sub: 'choices 6–8', color: 'var(--amber)', items: backup.slice(0, 3), cardCls: 'sc-safe' },
   ]
   return (
     <div className="strategy-panel">
@@ -165,6 +226,7 @@ export default function App() {
   const [rank,      setRank]      = useState('')
   const [category,  setCategory]  = useState('OC')
   const [gender,    setGender]    = useState('BOYS')
+  const [phase,     setPhase]     = useState('first')
   const [district,  setDistrict]  = useState('')
   const [branch,    setBranch]    = useState('')
   const [ctype,     setCtype]     = useState('')
@@ -183,6 +245,8 @@ export default function App() {
 
   const colKey  = `${category}_${gender}`
   const rankNum = parseInt(rank, 10) || 0
+  const phaseData = DATA_BY_PHASE[phase] || DATA
+  const phaseLabel = PHASES.find(p => p.key === phase)?.label || 'First Phase'
 
   // Sticky bar visibility via IntersectionObserver
   useEffect(() => {
@@ -206,18 +270,24 @@ export default function App() {
   const results = useMemo(() => {
     if (!searched || !rankNum) return []
     const q = searchQ.toLowerCase()
-    return DATA.filter(row => {
+    const matchingRows = phaseData.filter(row => {
       const closing = row[colKey]
       if (!closing) return false
-      if (closing < rankNum) return false
       if (row.gender === 'GIRLS' && gender === 'BOYS') return false
       if (district && row.dist   !== district) return false
       if (branch   && row.branch !== branch)   return false
       if (ctype    && row.ctype  !== ctype)    return false
       if (q && !row.name.toLowerCase().includes(q) && !row.branch.toLowerCase().includes(q)) return false
       return true
-    }).map(row => ({ ...row, closing: row[colKey] }))
-  }, [searched, rankNum, colKey, gender, district, branch, ctype, searchQ])
+    }).map(row => ({ ...row, closing: row[colKey], delta: row[colKey] - rankNum }))
+
+    const buckets = getCounsellingBuckets(matchingRows)
+    return [
+      ...buckets.canTry.map(row => ({ ...row, chance: CHANCE_META.canTry, chanceGroup: 'canTry' })),
+      ...buckets.good.map(row => ({ ...row, chance: CHANCE_META.good, chanceGroup: 'good' })),
+      ...buckets.backup.map(row => ({ ...row, chance: CHANCE_META.backup, chanceGroup: 'backup' })),
+    ]
+  }, [searched, rankNum, colKey, gender, district, branch, ctype, searchQ, phaseData])
 
   const sorted = useMemo(() => (
     [...results].sort((a, b) => {
@@ -228,9 +298,9 @@ export default function App() {
     })
   ), [results, sortCol, sortAsc])
 
-  const safe   = sorted.filter(r => r.closing - rankNum >= 2000)
-  const border = sorted.filter(r => { const d = r.closing - rankNum; return d >= 500 && d < 2000 })
-  const tight  = sorted.filter(r => r.closing - rankNum < 500)
+  const canTry = sorted.filter(r => r.chanceGroup === 'canTry')
+  const good   = sorted.filter(r => r.chanceGroup === 'good')
+  const backup = sorted.filter(r => r.chanceGroup === 'backup')
 
   const handleSearch = useCallback(e => {
     e.preventDefault()
@@ -284,15 +354,15 @@ export default function App() {
     const text = sorted.slice(0, 8)
       .map((r, i) => `${i + 1}. ${r.name} — ${r.branch} (${r.closing.toLocaleString('en-IN')})`)
       .join('\n')
-    navigator.clipboard?.writeText(`TGEAPCET 2025 — Rank ${rankNum}, ${colKey}\n\n${text}`)
+    navigator.clipboard?.writeText(`TGEAPCET 2025 - ${phaseLabel} - Rank ${rankNum}, ${colKey}\n\n${text}`)
       .then(() => alert('Copied top 8 to clipboard!'))
-  }, [sorted, rankNum, colKey])
+  }, [sorted, rankNum, colKey, phaseLabel])
 
   const shareWhatsApp = useCallback(() => {
-    const text = `TGEAPCET 2025 — My college list\nRank: ${rankNum.toLocaleString()}, ${colKey.replace(/_/g, ' ')}\n\n` +
+    const text = `TGEAPCET 2025 - ${phaseLabel} - My college list\nRank: ${rankNum.toLocaleString()}, ${colKey.replace(/_/g, ' ')}\n\n` +
       sorted.slice(0, 6).map((r, i) => `${i + 1}. ${r.name.split(' ').slice(0, 4).join(' ')} — ${r.bcode} (${r.closing.toLocaleString()})`).join('\n')
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
-  }, [sorted, rankNum, colKey])
+  }, [sorted, rankNum, colKey, phaseLabel])
 
   const shortlistedRows = sorted.filter(r => shortlist.has(r.code + r.bcode))
   const catLabel = CATEGORIES.find(c => c.key === category)?.label || category
@@ -310,7 +380,7 @@ export default function App() {
       {/* ── HERO ── */}
       <div className="hero">
         <div className="hero-inner">
-          <div className="hero-badge">🎓 TGEAPCET 2025 · First Phase · Official Data</div>
+          <div className="hero-badge">🎓 TGEAPCET 2025 · {phaseLabel} · Official Data</div>
           <h1 className="hero-title">Predict your best<br/>TGEAPCET colleges</h1>
           <p className="hero-sub">
             Get realistic admission chances based on<br/>
@@ -346,6 +416,22 @@ export default function App() {
                 </div>
               </div>
 
+              <div className="form-grid-2">
+                <div className="field">
+                  <label>Phase</label>
+                  <select value={phase} onChange={e => setPhase(e.target.value)}>
+                    {PHASES.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Branch</label>
+                  <select value={branch} onChange={e => setBranch(e.target.value)}>
+                    <option value="">All branches</option>
+                    {ALL_BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
+              </div>
+
               <button type="button" className="adv-toggle" onClick={() => setShowAdv(s => !s)}>
                 {showAdv ? '▾' : '▸'} Advanced filters
               </button>
@@ -357,13 +443,6 @@ export default function App() {
                     <select value={district} onChange={e => setDistrict(e.target.value)}>
                       <option value="">All districts</option>
                       {ALL_DISTRICTS.map(d => <option key={d} value={d}>{DIST_NAMES[d] || d}</option>)}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label>Branch</label>
-                    <select value={branch} onChange={e => setBranch(e.target.value)}>
-                      <option value="">All branches</option>
-                      {ALL_BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
                     </select>
                   </div>
                   <div className="field">
@@ -404,12 +483,12 @@ export default function App() {
               </div>
               <div className="stat-card stat-lg stat-highlight">
                 <div className="stat-label stat-label-green">Good Chance</div>
-                <div className="stat-val stat-val-xl">{safe.length}</div>
-                <div className="stat-hint">colleges you can safely get</div>
+                <div className="stat-val stat-val-xl">{good.length}</div>
+                <div className="stat-hint">realistic colleges for this rank</div>
               </div>
               <div className="stat-card stat-sm">
                 <div className="stat-label">Can Try</div>
-                <div className="stat-val stat-amber">{tight.length + border.length}</div>
+                <div className="stat-val stat-amber">{canTry.length}</div>
               </div>
             </div>
 
@@ -429,7 +508,7 @@ export default function App() {
             </div>
 
             {/* Strategy */}
-            {sorted.length > 0 && <StrategyPanel tight={tight} border={border} safe={safe} />}
+            {sorted.length > 0 && <StrategyPanel canTry={canTry} good={good} backup={backup} />}
 
             {/* Shortlist bar */}
             {shortlist.size > 0 && (
@@ -460,7 +539,7 @@ export default function App() {
               <>
                 <div className="results-header">
                   <p className="results-count">
-                    {sorted.length} result{sorted.length !== 1 ? 's' : ''} · {colKey.replace(/_/g, ' ')}
+                    {sorted.length} result{sorted.length !== 1 ? 's' : ''} · {phaseLabel} · {colKey.replace(/_/g, ' ')}
                   </p>
                   <div className="btn-row">
                     <button className="btn-sm" onClick={shareWhatsApp}>📱 WhatsApp</button>
@@ -499,7 +578,7 @@ export default function App() {
                     </thead>
                     <tbody>
                       {sorted.map((row, i) => {
-                        const ch  = getChance(row.closing, rankNum)
+                        const ch  = row.chance || getChance(row.closing, rankNum)
                         const key = row.code + row.bcode
                         const saved = shortlist.has(key)
                         const isGov = row.ctype === 'GOV' || row.ctype === 'UNIV'
@@ -532,13 +611,25 @@ export default function App() {
                 </div>
 
                 <p className="disclaimer">
-                  Source: TGEAPCET 2025 Official Last Rank Statement — First Phase. Closing ranks are from the first phase only; actual cutoffs may change in later phases. As per G.O.Ms.No. 42, girls are also eligible for seats listed under boys category.
+                  Source: TGEAPCET 2025 Official Last Rank Statement - {phaseLabel}. This is entirely based on TGEAPCET official data. Actual seats may vary depending on seat availability, NCC, CAP, sports, and other applicable reservation or admission rules. As per G.O.Ms.No. 42, girls are also eligible for seats listed under boys category.
                 </p>
               </>
             )}
           </>
         )}
       </div>
+
+      <footer className="about-section">
+        <div className="about-inner">
+          <h2>About Us</h2>
+          <p>Developed by Akshay with love for engineering students.</p>
+          <p>Contact: <a href="mailto:akshay.salla2@gmail.com">akshay.salla2@gmail.com</a></p>
+          <p className="about-disclaimer">
+            Disclaimer: This website is entirely based on TGEAPCET official data. Actual seats may vary depending on seat availability, NCC, CAP, sports, and other applicable reservation or admission rules.
+          </p>
+        </div>
+      </footer>
     </>
   )
 }
+
