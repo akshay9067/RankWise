@@ -4,7 +4,7 @@ A free, frontend-only React website that helps TGEAPCET students find eligible
 colleges based on their rank, caste category, and gender.
 
 ## Features
-- 942 college-branch combinations from the 2025 First Phase last rank statement
+- 942 college-branch combinations from the 2025 last rank statements.
 - Filter by district, branch, and college type
 - Sortable results table (click column headers)
 - Safe / Borderline / Tight chance badges
