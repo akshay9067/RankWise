@@ -3,6 +3,7 @@ import { DATA } from './data.js'
 import { SECOND_PHASE_DATA } from './dataSecondPhase.js'
 import { FINAL_PHASE_DATA } from './dataFinalPhase.js'
 
+
 // ── Constants ────────────────────────────────────────────────────────────────
 const CATEGORIES = [
   { label: 'OC — Open Category', key: 'OC' },
@@ -301,6 +302,11 @@ export default function App() {
   const canTry = sorted.filter(r => r.chanceGroup === 'canTry')
   const good   = sorted.filter(r => r.chanceGroup === 'good')
   const backup = sorted.filter(r => r.chanceGroup === 'backup')
+  useEffect(() => {
+  if (searched && results.length === 0 && window.gtag) {
+    window.gtag('event', 'no_results')
+  }
+}, [searched, results])
 
   const handleSearch = useCallback(e => {
     e.preventDefault()
@@ -317,6 +323,20 @@ export default function App() {
       } else {
         clearInterval(interval)
         setIsLoading(false)
+        if (window.gtag) {
+  window.gtag('event', 'college_search', {
+    rank_range:
+      Number(rank) < 10000 ? '0-10k' :
+      Number(rank) < 25000 ? '10k-25k' :
+      Number(rank) < 50000 ? '25k-50k' :
+      Number(rank) < 100000 ? '50k-100k' :
+      '100k+',
+
+    category: category,
+    gender: gender,
+    phase: phase
+  })
+}
         setSearched(true)
         setSortCol('closing')
         setSortAsc(true)
