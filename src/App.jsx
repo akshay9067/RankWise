@@ -400,7 +400,7 @@ export default function App() {
       {/* ── HERO ── */}
       <div className="hero">
         <div className="hero-inner">
-          <div className="hero-badge">🎓 TGEAPCET 2025 · {phaseLabel} · Official Data</div>
+          <div className="hero-badge">🎓 TGEAPCET 2025 · Official Data</div>
           <h1 className="hero-title">Predict your best<br/>TGEAPCET colleges</h1>
           <p className="hero-sub">
             Get realistic admission chances based on<br/>
